@@ -1,15 +1,15 @@
 import FirebaseListener from './FirebaseListener';
 
 export class FirebaseIndex extends FirebaseListener {
-    constructor(uniqueId, groupIds, processor, onComplete) {
+    constructor(uniqueId, groupIds, processor, onCompleted) {
         super();
 
         this.uniqueId = uniqueId;
         this.groupIds = groupIds;
         this.processor = processor;
-        this.onCompleted = onComplete;
+        this.onCompleted = onCompleted;
 
-        this.index = {};
+        this.index = new Map();
         this.groupIndexes = {};
         this._isPopulated = false;
 
@@ -26,40 +26,66 @@ export class FirebaseIndex extends FirebaseListener {
 
     find(id){
         console.assert(this.isPopulated());
-        return this.index[id];
+        return this.index.get(id);
+    }
+
+    getGroup(groupType, groupId) {
+        return Object.keys(this.groupIndexes[groupType][groupId]).map(x => this.find(x));
     }
 
     isPopulated() {
         return this._isPopulated;
     }
 
-    onChange(change) {
-        let data = change.doc.data();
-        this.processor(data);
-        this.update(data);
-    }
-
-    onComplete() {
-        this._isPopulated = true;
-        this.onCompleted(this.changedIds, this.changedGroups);
-        this.resetState();
-    }
-
-    resetState() {
-        this.changedIds = {};
-        this.changedGroups = {};
-        for(let g of this.groupIds) {
-            this.changedGroups[g] = {};
+    onAdd(id, record) {
+        if (!this.validateChange(id, record)) {
+            return false;
         }
+
+        this.addedIds[id] = true;
+        this.processChange(record, false);
     }
 
-    update(item) {
+    onModify(id, record) {
+        if (!this.validateChange(id, record)) {
+            return false;
+        }
+
+        this.changedIds[id] = true;
+        this.processChange(record, false);
+    }
+
+    onRemove(id, record) {
+        if (!this.validateChange(id, record)) {
+            return false;
+        }
+
+        this.removedIds[id] = true;
+        this.processChange(record, true);
+    }
+
+    validateChange(fid, record) {
+        let _id = record._id;
+        let id = this.getUniqueId(record);
+
+        if (!id || !_id || !fid || id === "" || _id !== id || fid !== id) {
+            console.warn("id mismatch: %s != %s", _id, id, record);
+            return false;
+        }
+
+        return true;
+    }
+
+    processChange(data, removed) {
+        this.processor(data);
+        this.updateIndexes(data, removed);
+    }
+
+    updateIndexes(item, removed) {
         let id = this.getUniqueId(item);
 
-        let oldItem = this.index[id];
+        let oldItem = this.index.get(id);
         for(let g of this.groupIds) {
-            let groupId = this.getGroupId[g](item);
-
             if(oldItem) {
                 let oldGroupId = this.getGroupId[g](oldItem);
                 if(this.groupIndexes[g][oldGroupId])
@@ -68,16 +94,37 @@ export class FirebaseIndex extends FirebaseListener {
                 this.changedGroups[g][oldGroupId] = true;
             }
 
-            if(!this.groupIndexes[g][groupId])
-                this.groupIndexes[g][groupId] = {};
+            if(!removed) {
+                let groupId = this.getGroupId[g](item);
+                if(!this.groupIndexes[g][groupId])
+                    this.groupIndexes[g][groupId] = {};
 
-            this.groupIndexes[g][groupId][id] = item;
-            this.changedGroups[g][groupId] = true;
+                this.groupIndexes[g][groupId][id] = true;
+                this.changedGroups[g][groupId] = true;
+            }
         }
 
-        this.index[id] = item;
+        if (!removed) {
+            this.index.set(id, item);
+        } else {
+            this.index.delete(id);
+        }
+    }
 
-        this.changedIds[id] = true;
+    onComplete() {
+        this._isPopulated = true;
+        this.onCompleted(this.addedIds, this.removedIds, this.changedIds, this.changedGroups);
+        this.resetState();
+    }
+
+    resetState() {
+        this.addedIds = {};
+        this.removedIds = {};
+        this.changedIds = {};
+        this.changedGroups = {};
+        for(let g of this.groupIds) {
+            this.changedGroups[g] = {};
+        }
     }
 
     _makeGetter(f) {

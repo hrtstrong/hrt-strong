@@ -10,7 +10,7 @@ class DataManagerListener extends FirebaseListener {
     }
 
     onAdd(id, record) {
-        console.log("added [%s]", id, record)
+        console.debug("added [%s]", id, record)
         this.manager.insert(this._format(id, record));
 
     }

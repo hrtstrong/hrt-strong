@@ -29,6 +29,7 @@ const SAMPLE_CSS = `
 }
 `;
 
+const ISO_DATE = {type:'date', format:'yyyy-MM-dd'};
 
 export class MyGridComponent extends Component {
     constructor(props) {
@@ -43,7 +44,7 @@ export class MyGridComponent extends Component {
     }
 
     captionSum(props) {
-        return (<span>{props.Sum}</span>);
+        return (<span>{Math.round(Number((String(props.Sum)).replace(",","")))}</span>);
     }
 
     render() {
@@ -52,21 +53,26 @@ export class MyGridComponent extends Component {
                 <div className='control-section'>
                 <GridComponent
                 dataSource={this.props.dataSource}
-                enableVirtualization={true}
-                height="400"
+                enableVirtualization={false}
+                //height="400"
                 gridLines="Both"
                 columns={[
                     {field : "treeAgg",   headerText: "A"},
                     {field : "teamName",  headerText: "Team"},
                     {field : "userName",  headerText: "Member"},
                     {field : "activity",  headerText: "activity"},
-                    {field : "points",    headerText: "Points"},
-                    {field : "date",      headerText: "Date"},
+                    {field : "points",    headerText: "Points", format:"N1", textAlign: "Right"},
+                    {field : "spirit",    headerText: "Spirit?", displayAsCheckBox: true, textAlign: "Center"},
+                    {field : "date",      headerText: "Date", format:ISO_DATE},
 
                     {field : "createTime",headerText: "Log Time"},
                     {field : "email",     headerText: "e-mail"},
-                    {field : "duration",  headerText: "Duration"},
-                    {field : "rawPoints", headerText: "Raw Points"},
+                    {field : "duration",  headerText: "Duration", format:"N0", textAlign: "Right"},
+                    {field : "rawPoints", headerText: "Raw Points", format:"N1", textAlign: "Right"},
+                    {field : "dayPoints", headerText: "Day Points", format:"N1", textAlign: "Right"},
+                    {field : "bonusPoints", headerText: "Spirit Points", format:"N1", textAlign: "Right"},
+                    {field : "spiritPoints", headerText: "Bonus Points", format:"N1", textAlign: "Right"},
+                    {field : "reasons" }
                 ]}
                 allowFiltering={true}
                 allowGrouping={true}
@@ -74,7 +80,7 @@ export class MyGridComponent extends Component {
                 allowResizing={true}
                 allowSearching={true}
                 allowSorting={true}
-                enablePersistence={true}
+                //enablePersistence={true}
                 showColumnChooser={true}
                 showColumnMenu={true}
                 groupSettings={{
@@ -91,7 +97,8 @@ export class MyGridComponent extends Component {
                 <AggregatesDirective>
                 <AggregateDirective>
                 <AggregateColumnsDirective>
-                <AggregateColumnDirective field='email' type='Sum' groupCaptionTemplate={this.captionSum} />
+                <AggregateColumnDirective field='rawPoints' type='Sum' format="N0" groupCaptionTemplate={this.captionSum} />
+                <AggregateColumnDirective field='points' type='Sum' groupCaptionTemplate={this.captionSum} />
                 <AggregateColumnDirective field='duration' type='Sum' groupCaptionTemplate={this.captionSum} />
                 </AggregateColumnsDirective>
                 </AggregateDirective>

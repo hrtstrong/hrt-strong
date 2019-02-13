@@ -13,7 +13,7 @@ let app = new App();
 window.app = app;
 
 ReactDOM.render(
-        <MyGridComponent dataSource={app.dm} dm={app.dm} updater={app.listener} />,
+        <MyGridComponent dataSource={app.dm} dm={app.dm} updater={app.dataModel} />,
     document.getElementById('root')
 );
 

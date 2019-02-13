@@ -38,11 +38,11 @@ export class FirebaseListener {
 
     }
 
-    onRemove(id, record) {
+    onModify(id, record) {
 
     }
 
-    onModify(id, record) {
+    onRemove(id, record) {
 
     }
 
