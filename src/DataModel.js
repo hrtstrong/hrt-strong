@@ -52,23 +52,22 @@ function aggregateWeek(activities) {
     let tots = {};
 
     for (let a of activities) {
-        tots[getDayId(a)] = (tots[getDayId(a)] || 0) + a.rawPoints;
+        tots[getDayId(a)] = (tots[getDayId(a)] || 0) + a.rawPoints * !a.tooLate;
     }
 
-    let worstDay = seek(tots, (x,y) => y < x);
-    let bestDay = seek(tots, (x,y) => y > x);
+    let worstDay = seek(tots, (n,c) => n < c);
+    let bestDay = seek(tots, (n,c) => n > c);
 
     let n = Object.keys(tots).length;
+    console.assert(n <= 7);
 
     for (let a of activities) {
         let thisDay = getDayId(a);
-        if (n === 7 && thisDay === worstDay) {
+        if (n >= 7 && thisDay === worstDay) {
             a.dayPoints = 0;
             addReason(a, 'worstDay');
-        }
-
-        if (getDayId(a) === bestDay) {
-            a.dayPoints = a.rawPoints;
+        } else if (thisDay === bestDay) {
+            a.dayPoints = a.rawPoints * !a.tooLate;
             addReason(a, "bestDay");
         }
 
@@ -83,10 +82,14 @@ function aggregateDay(activities) {
     for(let a of activities) {
         a.reasons = [];
         a.dayPoints = Math.min(a.rawPoints, Math.max(0, DAY_MAX - tot));
-        tot += a.dayPoints;
-        if (a.dayPoints !== a.rawPoints) {
-            addReason(a, "dailyMax <= 16");
+        if (a.tooLate) {
+            a.dayPoints = 0;
+            addReason(a, "loggedTooLate");
+        } else if (a.dayPoints !== a.rawPoints) {
+            addReason(a, "> dailyLimit");
         }
+
+        tot += a.dayPoints;
 
         a.spiritPoints = a.spirit ? 1 : 0;
         a.bonusPoints = 0;
@@ -99,13 +102,38 @@ function aggregateDay(activities) {
         let a = activities[activities.length - 1];
         let bonusPoints = Math.min(2, bonus.reduce((x,y) => x + y, 0));
         a.bonusPoints = bonusPoints || 0;
+    } else {
+        console.assert(bonus.reduce((x,y)=>x+y, 0));
     }
 }
+
+function aggregateUser(activities) {
+    let tot = activities.reduce((t,a) => a.points + t, 0)
+
+    for(let a of activities) {
+        a.userPoints = tot;
+
+        let strTot = String(Math.trunc(tot));
+        a.userSort = ("      " + strTot).substr(-6) + " - " + a.userName;
+    }
+}
+
+function aggregateTeam(activities) {
+    let tot = activities.reduce((t,a) => a.points + t, 0)
+
+    for(let a of activities) {
+        let strTot = String(Math.trunc(tot));
+        a.teamSort = ("      " + strTot).substr(-6) + " - " + a.teamName;
+    }
+}
+
 
 function addReason(entry, reason) {
     if (!entry.reasons) entry.reasons = [];
 
-    entry.reasons.push(reason);
+    if (entry.reasons.indexOf(reason) < 0) {
+        entry.reasons.push(reason);
+    }
 }
 
 export class DataModel extends SFNotifier {
@@ -128,7 +156,7 @@ export class DataModel extends SFNotifier {
         );
 
         this.activities = new FirebaseIndex(
-            "name",
+            "_id",
             [],
             x => this.preEnrichActivity(x),
             () => this.onRecalcAllUpdate()
@@ -140,7 +168,7 @@ export class DataModel extends SFNotifier {
 
         this.leaderboard = new FirebaseIndex(
             "_id",
-            [getDayId, getWeekId],
+            [],
             x => this.preEnrichLeaderboard(x),
             (a,r,c,g) => this.onLeaderboardUpdate(a,r,c,g)
         );
@@ -148,10 +176,17 @@ export class DataModel extends SFNotifier {
             firebase.store.collection("leaderboard"),
             this.leaderboard
         );
+
+        this.leaderboardEnriched = new FirebaseIndex(
+            "_id",
+            [getDayId, getWeekId, "email", "teamName"],
+            x => true,
+            (a,r,c,g) => this.onLeaderboardEnrichedUpdate(a,r,c,g)
+        );
     }
 
     preEnrichActivity(activity) {
-        activity.ppm = activity.points / activity.duration;
+        activity.ppm = activity.unitPoints / activity.unitDuration;
         return true;
     }
 
@@ -159,14 +194,12 @@ export class DataModel extends SFNotifier {
         entry.createTime = entry.createTime.toDate();
         entry.date = entry.date.toDate();
 
+        entry.tooLate = ((entry.createTime - entry.date) / 1000 / 3600 > 60);
+
         entry.dayId = getDayId(entry);
         entry.weekId = getWeekId(entry);
 
         entry.reason = "";
-    }
-
-    postEnrichLeaderboard(entry) {
-
     }
 
     enrichLeaderboard(entry) {
@@ -180,66 +213,93 @@ export class DataModel extends SFNotifier {
         let activity = this.activities.find(entry.activity);
         if (!user || !activity) {
             console.warn("could not find user or activity for", entry, user, activity);
-            user = activity = {};
+            if (!user) {
+                user = {};
+            }
+
+            if (!activity) {
+                activity = {};
+            }
         }
 
         entry.teamName = user.team;
         entry.userName = user.name;
-        entry.rawPoints = (entry.duration >= activity.duration ? entry.duration * activity.ppm : 0) || 0;
+        entry.activityName = activity.name;
+        entry.rawPoints = (entry.duration >= activity.minDuration ? entry.duration * activity.ppm : 0) || 0;
+        if (entry.duration < activity.minDuration) {
+            addReason(entry, "< minDuration")
+        }
 
         return true;
     }
 
+    processGroup(groups, groupType, process, allModified) {
+        for(let groupId of Object.keys(groups[groupType])) {
+            let group = this.leaderboardEnriched.getGroup(groupType, groupId);
+            process(group);
+            for(let g of group) {
+                allModified[g._id] = g;
+            }
+        }
+    }
+
     onLeaderboardUpdate(added, removed, changed, groups) {
+        console.log("onLeaderboardUpdate");
         if(!this.isReady()) return false;
+        console.log(added, removed, changed, groups);
 
         for (let id of Object.keys(added)) {
             let e = this.leaderboard.find(id);
             this.enrichLeaderboard(e);
+            this.leaderboardEnriched.onAdd(id, e);
         }
 
         for (let id of Object.keys(changed)) {
             let e = this.leaderboard.find(id);
             this.enrichLeaderboard(e);
+            this.leaderboardEnriched.onModify(id, e);
         }
+
+        for (let id of Object.keys(removed)) {
+            this.leaderboardEnriched.onRemove(id, this.leaderboardEnriched.find(id));
+        }
+
+        this.leaderboardEnriched.onComplete();
+    }
+
+    onLeaderboardEnrichedUpdate(added, removed, changed, groups) {
+        console.log("onLeaderboardEnrichedUpdate");
+        console.log(added, removed, changed, groups);
 
         // groups
-        let allModified = {};
-        for(let groupId of Object.keys(groups[getDayId])) {
-            let group = this.leaderboard.getGroup(getDayId, groupId);
-            aggregateDay(group);
-            for(let g of group) {
-                allModified[g._id] = g;
-            }
-        }
-
-        for(let groupId of Object.keys(groups[getWeekId])) {
-            let group = this.leaderboard.getGroup(getWeekId, groupId);
-            aggregateWeek(group);
-            for(let g of group) {
-                allModified[g._id] = g;
-            }
-        }
+        let allModified = changed;
+        this.processGroup(groups, getDayId, aggregateDay, allModified);
+        this.processGroup(groups, getWeekId, aggregateWeek, allModified);
+        this.processGroup(groups, "email", aggregateUser, allModified);
+        this.processGroup(groups, "teamName", aggregateTeam, allModified);
 
         for (let id of Object.keys(added)) {
-            let e = this.leaderboard.find(id);
+            let e = this.leaderboardEnriched.find(id);
             this.manager.insert(e);
         }
 
-        for (let id of Object.keys(changed)) {
-            let e = this.leaderboard.find(id);
+        for (let id of Object.keys(allModified)) {
+            let e = this.leaderboardEnriched.find(id);
             this.manager.update("_id", e);
         }
 
         for (let id of Object.keys(removed)) {
-            let e = this.leaderboard.find(id);
+            let e = this.leaderboardEnriched.find(id);
             this.manager.remove("_id", e);
         }
 
-        this.onComplete();
+        if (Object.keys(allModified).length) {
+            this.onComplete();
+        }
     }
 
-    onRecalcAllUpdate() {
+    onRecalcAllUpdate(a, r, c, g) {
+        console.log("onRecalcAllUpdate");
         if(!this.isReady()) return false;
 
         this.recalcAll();
@@ -247,15 +307,21 @@ export class DataModel extends SFNotifier {
     }
 
     recalcAll() {
-        let first = this.populatedGrid;
+        let first = !this.populatedGrid;
+        console.log("recalcAll first", first);
+
+        let keys = {}
+        this.leaderboard.index.forEach((v,k) => keys[k] = true);
+
         if (first) {
-            this.onLeaderboardUpdate(this.leaderboard.index, [], [], this.leaderboard.groupIds);
+            this.onLeaderboardUpdate(keys, {}, {}, this.leaderboard.groupIndexes);
         } else {
-            this.onLeaderboardUpdate([], this.leaderboard.index, [], this.leaderboard.groupIds);
+            this.onLeaderboardUpdate({}, {}, keys, this.leaderboard.groupIndexes);
         }
     }
 
     onComplete() {
+        console.log("onComplete called");
         this.populatedGrid = true;
         for(let t of this.subscribers) {
             t.onUpdate();

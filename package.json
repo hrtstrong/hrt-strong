@@ -6,6 +6,7 @@
     "@syncfusion/ej2-grids": "^16.4.48",
     "@syncfusion/ej2-pivotview": "^16.4.47",
     "@syncfusion/ej2-react-base": "^16.4.47",
+    "@syncfusion/ej2-react-buttons": "^16.4.53",
     "@syncfusion/ej2-react-grids": "^16.4.48",
     "@syncfusion/ej2-react-pivotview": "^16.4.47",
     "firebase": "^5.8.1",
